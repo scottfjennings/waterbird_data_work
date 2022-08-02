@@ -1,0 +1,158 @@
+---
+title: ''
+output: word_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+###
+library(tidyverse)
+library(here)
+library(birdnames)
+
+options(scipen = 999)
+
+
+source(here("code/utility/waterbird_utility_functions.r"))
+
+# read cleaned data
+wbirds4analysis <- readRDS(here("data_files/working_rds/wbirds4analysis")) %>% 
+  wbird_add_study_day() 
+
+# assign survey number based on date of survey
+# some missed surveys and inconsistencies in when surveys were done,
+# so can't simply assign sequential numbers or assign survey number based on 15-day chunks.
+# need a combo of the 2, plus some manual edits
+survey_numbers <- distinct(wbirds4analysis, study.year, date, study.day) %>% 
+  full_join(., wbirds4analysis %>% 
+              distinct(study.year, date) %>%
+              arrange(date) %>%
+              group_by(study.year) %>%
+              mutate(survey.num = as.numeric(row_number())))  %>% 
+  wbird_add_survey_period()%>% 
+  arrange(study.year, study.day) %>%
+  group_by(study.year) %>% 
+  # most years can be fixed with some simple rules
+  mutate(cor.survey.num = case_when(max(survey.num) == 4 ~ survey.num,
+                                    max(survey.num) < 4 & max(survey.per) < 4 ~ survey.num,
+                                    max(survey.num) < 4 ~ survey.per)) %>% 
+  ungroup() %>% 
+  # but for 2 years its easiest to just manually edit 
+  mutate(cor.survey.num = ifelse(study.year == 2002, cor.survey.num + 1, cor.survey.num),
+         cor.survey.num = ifelse(study.year == 2017 & survey.num == 2, 3, cor.survey.num)) 
+
+survey_numbers %>%
+  filter(cor.survey.num > 1) %>% 
+  mutate(survey.interval = ifelse(cor.survey.num == (lag(cor.survey.num) + 1), study.day - lag(study.day), NA)) %>% 
+  view()
+
+# double check yields reasonable assignments
+survey_numbers %>% 
+  mutate(date = as.character(date),
+         cor.survey.num = paste("s", cor.survey.num, sep = ".")) %>% 
+  pivot_wider(id_cols = study.year, names_from = cor.survey.num, values_from = date) %>%
+  select(study.year, s.1, s.2, s.3, s.4) %>% 
+  view()
+
+
+
+wbirds4analysis <- wbirds4analysis %>% 
+  full_join(., select(survey_numbers, study.year, date, cor.survey.num))
+
+between_count_var <- wbirds4analysis %>% 
+  full_join(., select(survey_numbers, study.year, date, cor.survey.num)) %>% 
+  group_by(study.year, alpha.code, cor.survey.num) %>% 
+  summarise(bay.total = sum(section.final)) %>% 
+  ungroup() %>% 
+  group_by(study.year, alpha.code) %>% 
+  summarise(mean.total = mean(bay.total),
+            sd.total = sd(bay.total),
+            num.surveys = n())
+  
+```
+
+
+There is no clear pattern in within year change in abundance. In some years we count more birds in the mid-winter surveys, in some years less. And in some years the number of birds counted does not vary substantially between surveys. Thus the mean across all surveys, perhaps weighted by number of surveys conducted that year, should serve as a good estimate of the number of waterbirds using Tomales Bay that winter.
+```{r}
+
+wbirds4analysis %>% 
+  group_by(study.year, study.day) %>% 
+  summarise(bay.total = sum(section.final)) %>% 
+  ungroup() %>% 
+  ggplot() +
+  #geom_line(aes(x = study.day, y = bay.total, color = as.factor(study.year))) +
+  stat_smooth(aes(x = study.day, y = bay.total, color  = as.factor(study.year)), method = "lm", se = FALSE, formula = y ~ x + I(x^2)) +
+  theme_bw() +
+  labs(x = "Day of study (1 Nov = study day 1)",
+       y = "Total waterbirds counted",
+       color = "Year")
+
+```
+
+
+```{r}
+
+wbirds4analysis %>% 
+  group_by(study.year, study.day) %>% 
+  summarise(bay.total = sum(section.final)) %>% 
+  ungroup() %>% 
+  ggplot() +
+  #geom_line(aes(x = study.day, y = bay.total, color = as.factor(study.year))) +
+  stat_smooth(aes(x = study.day, y = bay.total, color  = as.factor(study.year)), method = "lm", se = FALSE, formula = y ~ x + I(x^2)) +
+  theme_bw() +
+  labs(x = "Day of study (1 Nov = study day 1)",
+       y = "Total waterbirds counted",
+       color = "Year")
+
+```
+
+How does our estimate of overall waterbird abundance vary based on the number of surveys conducted?
+
+Here I sequentially removed surveys from the end of the season and recalculated the mean per survey abundance of all species combined. This suggests that if we were to only conduct survey (Which surveys included = 1), which is likely often the CBC count, then our estimated abundance would often be different than when we do multiple surveys in a season. There appears to be little difference in estimated total waterbird abundance between 2, 3, or all surveys. However, it should be noted that we have only conducted 4 surveys in 9 years; even when we have tried for 4 surveys, we've most often 3 instead. Thus it is not surprising that the "3" and "all" lines are so similar, because they are often exactly the same data.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, error=FALSE, fig.width=8, fig.height=6}
+
+survey_sample_3 <- expand.grid(study.year = seq(min(survey_numbers$study.year), max(survey_numbers$study.year)),
+                               cor.survey.num = seq(1, 4)) %>% 
+  group_by(study.year) %>% 
+  sample_n(3) %>% 
+  inner_join(., survey_numbers)
+
+
+
+
+bay_total_by_spp_survey <- function(df) {
+  df <- df %>% 
+    group_by(study.year, alpha.code, cor.survey.num) %>% 
+    summarise(bay.survey.count = sum(section.final)) %>% 
+    ungroup() %>% 
+    group_by(study.year, alpha.code) %>% 
+    summarise(mean.bay.survey.count = mean(bay.survey.count)) %>% 
+    ungroup()
+}
+
+
+count_by_which_surveys <- rbind(wbirds4analysis %>% bay_total_by_spp_survey() %>% mutate(which.surveys = "all"),
+      wbirds4analysis %>% filter(cor.survey.num < 4) %>% bay_total_by_spp_survey() %>% mutate(which.surveys = "3"),
+      wbirds4analysis %>% filter(cor.survey.num < 3) %>% bay_total_by_spp_survey() %>% mutate(which.surveys = "2"),
+      wbirds4analysis %>% filter(cor.survey.num < 2) %>% bay_total_by_spp_survey() %>% mutate(which.surveys = "1")) 
+
+
+surveys_per_year <-  survey_numbers %>% 
+  group_by(study.year) %>% 
+  filter(survey.num == max(survey.num)) %>% 
+  distinct(study.year, survey.num) %>% 
+  ungroup()
+
+count_by_which_surveys %>% 
+  group_by(study.year, which.surveys) %>% 
+  summarise(total.birds = sum(mean.bay.survey.count)) %>% 
+  ungroup() %>% 
+  right_join(., surveys_per_year) %>% 
+  ggplot(group = which.surveys) +
+  stat_smooth(aes(x = study.year, y = total.birds, color = which.surveys), se = FALSE) +
+  labs(x = "Number of surveys",
+       y = "Mean water birds counted per survey") +
+  theme_bw() +
+  geom_text(aes(x = study.year, y = 100, label = survey.num))
+
+```

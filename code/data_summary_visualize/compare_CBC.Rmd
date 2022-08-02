@@ -1,0 +1,107 @@
+---
+title: "Comparing 2021 CBC to previous years"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+```{r}
+
+library(tidyverse)
+library(birdnames)
+library(here)
+
+
+cbc_2021 <- read.csv(here("data_files/derived_data/CBC_2021.csv")) %>% 
+  mutate(common.name = case_when(common.name == "Scaup sp." ~ "Scaup",
+                                 common.name == "Scoter sp." ~ "Scoter",
+                                 grepl("Grebe sp.", common.name)  ~ "Western/Clark's Grebe",
+                                 common.name == "Double-crstd Cormorant" ~ "Double-crested Cormorant",
+                                 common.name == "Blk-crowned Night-Heron" ~ "Black-crowned Night-Heron",
+                                 common.name == "Pac/Com Loon" ~ "Pacific/Common Loon",
+                                 TRUE ~ as.character(common.name)),
+         alpha.code = translate_bird_names(common.name, "common.name", "alpha.code"),
+         season = 2021) %>% 
+  filter(!is.na(count)) %>% 
+  rename(baywide.count = count) %>% 
+  select(-common.name)
+
+cbc <- read.csv(here("data_files/derived_data/waterbird_CBC_species_totals_by_year.csv")) %>% 
+  rename(alpha.code = species)
+
+```
+
+
+```{r}
+
+cbc_plotter <- function(zspp) {
+  cbc_21_sp <- filter(cbc_2021, alpha.code == zspp)
+  cbc_sp <- filter(cbc, alpha.code == zspp)
+
+  
+  ggplot() +
+    geom_point(data = cbc_sp, aes(x = season, y = baywide.count)) +
+    stat_smooth(data = cbc_sp, aes(x = season, y = baywide.count)) +
+    geom_point(data = cbc_21_sp, aes(x = season, y = baywide.count), color = "red") +
+    labs(title = translate_bird_names(toString(zspp), "alpha.code", "common.name"),
+         y = "Baywide count",
+         x = "") +
+    theme_bw()
+  
+}
+
+
+```
+
+
+```{r}
+cbc_plotter("SUSC")
+```
+
+
+
+```{r}
+cbc_plotter("AMCO")
+```
+
+
+```{r}
+cbc_plotter("GRSC")
+```
+
+```{r}
+cbc_plotter("COLO")
+```
+
+```{r}
+cbc_plotter("RTLO")
+```
+
+```{r}
+cbc_plotter("BRAN")
+```
+
+```{r}
+cbc_plotter("DCCO")
+```
+
+```{r}
+cbc_plotter("BRAC")
+```
+
+```{r}
+cbc_plotter("RUDU")
+```
+
+```{r}
+cbc_plotter("EAGR")
+```
+
+```{r}
+cbc_plotter("HOGR")
+```
+
